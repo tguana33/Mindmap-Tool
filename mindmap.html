@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mindmap Tool</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: sans-serif; }
+    #toolbar {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: white; padding: 10px 20px; border-radius: 24px;
+      display: flex; align-items: center; gap: 10px;
+      z-index: 10; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    }
+    #nodeTextInput { border: 1px solid #ccc; border-radius: 20px; padding: 6px 12px; font-size: 14px; outline: none; }
+    #canvas-container { width: 100%; height: 100%; background: #f0f0f0; position: relative; overflow: hidden; }
+    #renameInput, #reorderUp, #reorderDown {
+      position: absolute; display: none; font-size: 14px;
+      padding: 0 6px; border-radius: 6px; border: 1px solid #ccc;
+      z-index: 20; box-sizing: border-box;
+    }
+    #renameInput {
+      height: 40px; line-height: 40px;
+    }
+    #reorderUp, #reorderDown {
+      font-size: 12px; background: white; cursor: pointer; height: auto;
+    }
+    canvas { display: block; touch-action: none; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <input id="nodeTextInput" type="text" placeholder="New node label" />
+    <button onclick="addNode()">Add Node</button>
+    <button onclick="clearNodes()">Clear</button>
+  </div>
+  <div id="canvas-container">
+    <canvas id="mindmap"></canvas>
+    <input id="renameInput" type="text" />
+    <button id="reorderUp" onclick="moveNodeUp()">↑</button>
+    <button id="reorderDown" onclick="moveNodeDown()">↓</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("mindmap");
+    const ctx = canvas.getContext("2d");
+    const renameInput = document.getElementById("renameInput");
+    const reorderUp = document.getElementById("reorderUp");
+    const reorderDown = document.getElementById("reorderDown");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let nodes = [];
+    let links = [];
+    let selectedNode = null;
+    let draggingNode = null;
+    let ghostX = 0, ghostY = 0;
+    let offsetX = 0, offsetY = 0;
+    let isDragging = false;
+
+    let viewOffsetX = 0, viewOffsetY = 0;
+    let viewScale = 1.0;
+    let isPanning = false;
+    let panStartX = 0, panStartY = 0;
+
+    class Node {
+      constructor(text) {
+        this.text = text;
+        this.numbering = "";
+        this.x = 0;
+        this.y = 0;
+        this.height = 40;
+        this.width = this.calculateWidth();
+        this.parent = null;
+        this.children = [];
+      }
+
+      calculateWidth() {
+        ctx.font = "14px sans-serif";
+        const label = this.numbering ? `${this.numbering} ${this.text}` : this.text;
+        return Math.max(100, ctx.measureText(label).width + 20);
+      }
+
+      draw(ctx, ghost = false) {
+        this.width = this.calculateWidth();
+        const label = this.numbering ? `${this.numbering} ${this.text}` : this.text;
+
+        ctx.globalAlpha = ghost ? 0.4 : 1.0;
+        ctx.fillStyle = (this === selectedNode && !ghost) ? "#d0eaff" : "white";
+        ctx.strokeStyle = "black";
+        ctx.lineWidth = 1;
+        const radius = 10;
+
+        const x = ghost ? ghostX : this.x;
+        const y = ghost ? ghostY : this.y;
+
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + this.width - radius, y);
+        ctx.quadraticCurveTo(x + this.width, y, x + this.width, y + radius);
+        ctx.lineTo(x + this.width, y + this.height - radius);
+        ctx.quadraticCurveTo(x + this.width, y + this.height, x + this.width - radius, y + this.height);
+        ctx.lineTo(x + radius, y + this.height);
+        ctx.quadraticCurveTo(x, y + this.height, x, y + this.height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = "black";
+        ctx.font = "14px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, x + this.width / 2, y + this.height / 2);
+        ctx.globalAlpha = 1.0;
+      }
+
+      isInside(mx, my) {
+        return mx >= this.x && mx <= this.x + this.width && my >= this.y && my <= this.y + this.height;
+      }
+    }
+
+    function toCanvasCoords(x, y) {
+      return {
+        x: (x - viewOffsetX) / viewScale,
+        y: (y - viewOffsetY) / viewScale
+      };
+    }
+
+    function addNode() {
+      const textInput = document.getElementById("nodeTextInput");
+      let text = textInput.value.trim();
+      if (!text) return;
+      textInput.value = "";
+
+      if (!selectedNode && nodes.length > 0) {
+        alert("Select a node to add a child node.");
+        return;
+      }
+
+      let node = new Node(text);
+      if (selectedNode) {
+        node.parent = selectedNode;
+        selectedNode.children.push(node);
+        links.push({ from: selectedNode, to: node });
+      }
+
+      nodes.push(node);
+      selectedNode = node;
+      autoLayout();
+      drawAll();
+    }
+
+    function autoLayout() {
+      const root = nodes.find(n => !n.parent);
+      if (!root) return;
+
+      const spacingX = 180;
+      const spacingY = 60;
+      const canvasCenterY = canvas.height / 2;
+      let yOffset = 0;
+
+      function layout(node, depth = 0) {
+        const children = node.children;
+        if (children.length === 0) {
+          node.x = depth * spacingX + 100;
+          node.y = yOffset;
+          yOffset += spacingY;
+          return node.y;
+        } else {
+          let childYs = children.map(child => layout(child, depth + 1));
+          const avgY = childYs.reduce((a, b) => a + b, 0) / childYs.length;
+          node.x = depth * spacingX + 100;
+          node.y = avgY;
+          return avgY;
+        }
+      }
+
+      yOffset = canvasCenterY - (countLeaves(root) * spacingY) / 2;
+      layout(root);
+      autoNumberNodes();
+    }
+
+    function autoNumberNodes() {
+      const root = nodes.find(n => !n.parent);
+      if (!root) return;
+
+      root.numbering = "";
+
+      function assignNumbers(node, prefix = "") {
+        node.children.forEach((child, index) => {
+          const number = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
+          child.numbering = number + ".";
+          assignNumbers(child, number);
+        });
+      }
+
+      assignNumbers(root);
+    }
+
+    function countLeaves(node) {
+      if (node.children.length === 0) return 1;
+      return node.children.map(countLeaves).reduce((a, b) => a + b, 0);
+    }
+
+    function drawAll() {
+      ctx.setTransform(viewScale, 0, 0, viewScale, viewOffsetX, viewOffsetY);
+      ctx.clearRect(
+        -viewOffsetX / viewScale,
+        -viewOffsetY / viewScale,
+        canvas.width / viewScale,
+        canvas.height / viewScale
+      );
+      for (const link of links) drawLine(link.from, link.to);
+      for (const node of nodes) node.draw(ctx);
+      if (isDragging && draggingNode) draggingNode.draw(ctx, true);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      updateReorderButtons();
+    }
+
+    function drawLine(from, to) {
+      const x1 = from.x + from.width;
+      const y1 = from.y + from.height / 2;
+      const x2 = to.x;
+      const y2 = to.y + to.height / 2;
+      const cp1x = x1 + 40;
+      const cp1y = y1;
+      const cp2x = x2 - 40;
+      const cp2y = y2;
+
+      ctx.strokeStyle = "#888";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x2, y2);
+      ctx.stroke();
+    }
+
+    function updateReorderButtons() {
+      if (!selectedNode || isDragging) {
+        reorderUp.style.display = "none";
+        reorderDown.style.display = "none";
+        return;
+      }
+      const x = selectedNode.x * viewScale + viewOffsetX + selectedNode.width * viewScale + 5;
+      const y = selectedNode.y * viewScale + viewOffsetY;
+      reorderUp.style.display = "block";
+      reorderDown.style.display = "block";
+      reorderUp.style.left = `${x}px`;
+      reorderUp.style.top = `${y}px`;
+      reorderDown.style.left = `${x}px`;
+      reorderDown.style.top = `${y + 20}px`;
+    }
+
+    function moveNodeUp() {
+      if (!selectedNode || !selectedNode.parent) return;
+      const siblings = selectedNode.parent.children;
+      const idx = siblings.indexOf(selectedNode);
+      if (idx > 0) {
+        [siblings[idx - 1], siblings[idx]] = [siblings[idx], siblings[idx - 1]];
+        autoLayout();
+        drawAll();
+      }
+    }
+
+    function moveNodeDown() {
+      if (!selectedNode || !selectedNode.parent) return;
+      const siblings = selectedNode.parent.children;
+      const idx = siblings.indexOf(selectedNode);
+      if (idx < siblings.length - 1) {
+        [siblings[idx], siblings[idx + 1]] = [siblings[idx + 1], siblings[idx]];
+        autoLayout();
+        drawAll();
+      }
+    }
+
+    function clearNodes() {
+      nodes = [];
+      links = [];
+      selectedNode = null;
+      drawAll();
+    }
+
+    canvas.addEventListener("mousedown", (e) => {
+      const { x: mx, y: my } = toCanvasCoords(e.clientX, e.clientY);
+      isPanning = true;
+      panStartX = e.clientX - viewOffsetX;
+      panStartY = e.clientY - viewOffsetY;
+      for (const node of nodes) {
+        if (node.isInside(mx, my)) {
+          offsetX = mx - node.x;
+          offsetY = my - node.y;
+          draggingNode = node;
+          ghostX = node.x;
+          ghostY = node.y;
+          isDragging = false;
+          selectedNode = node;
+          isPanning = false;
+          break;
+        }
+      }
+    });
+
+    canvas.addEventListener("mousemove", (e) => {
+      if (isPanning) {
+        viewOffsetX = e.clientX - panStartX;
+        viewOffsetY = e.clientY - panStartY;
+        drawAll();
+      }
+      if (!draggingNode) return;
+      const { x: mx, y: my } = toCanvasCoords(e.clientX, e.clientY);
+      const dx = mx - ghostX;
+      const dy = my - ghostY;
+      if (!isDragging && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        isDragging = true;
+      }
+      if (isDragging) {
+        ghostX = mx - offsetX;
+        ghostY = my - offsetY;
+        drawAll();
+      }
+    });
+
+    canvas.addEventListener("mouseup", (e) => {
+      isPanning = false;
+      if (isDragging && draggingNode) {
+        const { x: mx, y: my } = toCanvasCoords(e.clientX, e.clientY);
+        for (const node of nodes) {
+          if (node !== draggingNode && node.isInside(mx, my)) {
+            if (draggingNode.parent) {
+              draggingNode.parent.children = draggingNode.parent.children.filter(c => c !== draggingNode);
+            }
+            draggingNode.parent = node;
+            node.children.push(draggingNode);
+            links = links.filter(l => l.to !== draggingNode);
+            links.push({ from: node, to: draggingNode });
+            break;
+          }
+        }
+        autoLayout();
+      }
+      draggingNode = null;
+      isDragging = false;
+      drawAll();
+    });
+
+    canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const zoomAmount = -e.deltaY * 0.001;
+      const mouse = toCanvasCoords(e.clientX, e.clientY);
+      const newScale = Math.min(Math.max(viewScale * (1 + zoomAmount), 0.1), 4);
+
+      viewOffsetX -= (mouse.x * newScale - mouse.x * viewScale);
+      viewOffsetY -= (mouse.y * newScale - mouse.y * viewScale);
+      viewScale = newScale;
+      drawAll();
+    }, { passive: false });
+
+    canvas.addEventListener("dblclick", (e) => {
+      const { x: mx, y: my } = toCanvasCoords(e.clientX, e.clientY);
+      for (const node of nodes) {
+        if (node.isInside(mx, my)) {
+          renameInput.style.display = "block";
+          renameInput.value = node.text;
+          renameInput.style.left = `${node.x * viewScale + viewOffsetX}px`;
+          renameInput.style.top = `${node.y * viewScale + viewOffsetY}px`;
+          renameInput.style.width = `${node.width * viewScale}px`;
+          renameInput.style.height = `${node.height * viewScale}px`;
+          renameInput.style.lineHeight = `${node.height * viewScale}px`;
+          renameInput.focus();
+          renameInput.onblur = () => {
+            node.text = renameInput.value.trim() || node.text;
+            renameInput.style.display = "none";
+            autoLayout();
+            drawAll();
+          };
+          renameInput.onkeydown = (event) => {
+            if (event.key === "Enter") {
+              renameInput.blur();
+            }
+          };
+          break;
+        }
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      drawAll();
+    });
+
+    drawAll();
+  </script>
+</body>
+</html>
