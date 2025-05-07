@@ -13,7 +13,6 @@
       font-family: sans-serif;
       touch-action: none;
     }
-
     #toolbar {
       position: absolute;
       bottom: 20px;
@@ -29,7 +28,6 @@
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
       flex-wrap: wrap;
     }
-
     #nodeTextInput {
       border: 1px solid #ccc;
       border-radius: 20px;
@@ -37,7 +35,6 @@
       font-size: 14px;
       outline: none;
     }
-
     #canvas-container {
       width: 100%;
       height: 100%;
@@ -45,7 +42,6 @@
       position: relative;
       overflow: hidden;
     }
-
     #renameInput, #reorderUp, #reorderDown {
       position: absolute;
       display: none;
@@ -56,24 +52,20 @@
       z-index: 20;
       box-sizing: border-box;
     }
-
     #renameInput {
       height: 40px;
       line-height: 40px;
     }
-
     #reorderUp, #reorderDown {
       font-size: 12px;
       background: white;
       cursor: pointer;
       height: auto;
     }
-
     canvas {
       display: block;
       touch-action: none;
     }
-
     @media (max-width: 600px) {
       #toolbar {
         flex-direction: column;
@@ -123,6 +115,8 @@
     let panStartX = 0, panStartY = 0;
 
     let lastTouchDist = null;
+    let lastTapTime = 0;
+    let lastTapNode = null;
 
     class Node {
       constructor(text) {
@@ -178,10 +172,10 @@
       }
 
       isInside(mx, my) {
-        return mx >= this.x && mx <= this.x + this.width && my >= this.y && my <= this.y + this.height;
+        return mx >= this.x && mx <= this.x + this.width &&
+               my >= this.y && my <= this.y + this.height;
       }
     }
-
     function toCanvasCoords(x, y) {
       return {
         x: (x - viewOffsetX) / viewScale,
@@ -220,27 +214,6 @@
       requestDraw();
     }
 
-    function drawAll() {
-      ctx.setTransform(viewScale, 0, 0, viewScale, viewOffsetX, viewOffsetY);
-      ctx.clearRect(-viewOffsetX / viewScale, -viewOffsetY / viewScale, canvas.width / viewScale, canvas.height / viewScale);
-      for (const link of links) drawLine(link.from, link.to);
-      for (const node of nodes) node.draw(ctx);
-      if (isDragging && draggingNode) draggingNode.draw(ctx, true);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      updateReorderButtons();
-    }
-
-    let animationFrameRequested = false;
-    function requestDraw() {
-      if (!animationFrameRequested) {
-        animationFrameRequested = true;
-        requestAnimationFrame(() => {
-          drawAll();
-          animationFrameRequested = false;
-        });
-      }
-    }
-
     function drawLine(from, to) {
       const x1 = from.x + from.width;
       const y1 = from.y + from.height / 2;
@@ -257,6 +230,32 @@
       ctx.moveTo(x1, y1);
       ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x2, y2);
       ctx.stroke();
+    }
+
+    function drawAll() {
+      ctx.setTransform(viewScale, 0, 0, viewScale, viewOffsetX, viewOffsetY);
+      ctx.clearRect(
+        -viewOffsetX / viewScale,
+        -viewOffsetY / viewScale,
+        canvas.width / viewScale,
+        canvas.height / viewScale
+      );
+      for (const link of links) drawLine(link.from, link.to);
+      for (const node of nodes) node.draw(ctx);
+      if (isDragging && draggingNode) draggingNode.draw(ctx, true);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      updateReorderButtons();
+    }
+
+    let animationFrameRequested = false;
+    function requestDraw() {
+      if (!animationFrameRequested) {
+        animationFrameRequested = true;
+        requestAnimationFrame(() => {
+          drawAll();
+          animationFrameRequested = false;
+        });
+      }
     }
 
     function updateReorderButtons() {
@@ -349,21 +348,27 @@
       return node.children.map(countLeaves).reduce((a, b) => a + b, 0);
     }
 
-    // Unified Pointer Handling (Desktop + Touch)
-    function getCoords(e) {
+    function getEventPosition(e) {
       if (e.touches && e.touches.length > 0) {
         return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      } else {
-        return { x: e.clientX, y: e.clientY };
       }
+      return { x: e.clientX, y: e.clientY };
     }
 
-    canvas.addEventListener("touchstart", e => {
-      if (e.touches.length === 2) {
-        lastTouchDist = getTouchDistance(e);
-        return;
-      }
-      const { x, y } = getCoords(e);
+    function getTouchDistance(e) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    window.addEventListener("resize", () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      requestDraw();
+    });
+    // Mouse Events
+    canvas.addEventListener("mousedown", (e) => {
+      const { x, y } = getEventPosition(e);
       const { x: mx, y: my } = toCanvasCoords(x, y);
       isPanning = true;
       panStartX = x - viewOffsetX;
@@ -381,25 +386,10 @@
           break;
         }
       }
-    }, { passive: false });
+    });
 
-    canvas.addEventListener("touchmove", e => {
-      e.preventDefault();
-      if (e.touches.length === 2) {
-        const newDist = getTouchDistance(e);
-        const zoomAmount = newDist / lastTouchDist;
-        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        const mouse = toCanvasCoords(midX, midY);
-        const newScale = Math.min(Math.max(viewScale * zoomAmount, 0.1), 4);
-        viewOffsetX -= (mouse.x * newScale - mouse.x * viewScale);
-        viewOffsetY -= (mouse.y * newScale - mouse.y * viewScale);
-        viewScale = newScale;
-        lastTouchDist = newDist;
-        requestDraw();
-        return;
-      }
-      const { x, y } = getCoords(e);
+    canvas.addEventListener("mousemove", (e) => {
+      const { x, y } = getEventPosition(e);
       if (isPanning) {
         viewOffsetX = x - panStartX;
         viewOffsetY = y - panStartY;
@@ -417,12 +407,12 @@
         ghostY = my - offsetY;
         requestDraw();
       }
-    }, { passive: false });
+    });
 
-    canvas.addEventListener("touchend", e => {
+    canvas.addEventListener("mouseup", (e) => {
       isPanning = false;
       if (isDragging && draggingNode) {
-        const { x, y } = getCoords(e.changedTouches[0]);
+        const { x, y } = getEventPosition(e);
         const { x: mx, y: my } = toCanvasCoords(x, y);
         for (const node of nodes) {
           if (node !== draggingNode && node.isInside(mx, my)) {
@@ -443,19 +433,151 @@
       requestDraw();
     });
 
-    function getTouchDistance(e) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      return Math.sqrt(dx * dx + dy * dy);
-    }
+    canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const zoomAmount = -e.deltaY * 0.001;
+      const { x: mx, y: my } = toCanvasCoords(e.clientX, e.clientY);
+      const newScale = Math.min(Math.max(viewScale * (1 + zoomAmount), 0.1), 4);
 
-    window.addEventListener("resize", () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      viewOffsetX -= (mx * newScale - mx * viewScale);
+      viewOffsetY -= (my * newScale - my * viewScale);
+      viewScale = newScale;
+      requestDraw();
+    }, { passive: false });
+
+    // Touch Events
+    canvas.addEventListener("touchstart", (e) => {
+      if (e.touches.length === 2) {
+        lastTouchDist = getTouchDistance(e);
+        return;
+      }
+      const { x, y } = getEventPosition(e);
+      const { x: mx, y: my } = toCanvasCoords(x, y);
+      isPanning = true;
+      panStartX = x - viewOffsetX;
+      panStartY = y - viewOffsetY;
+
+      for (const node of nodes) {
+        if (node.isInside(mx, my)) {
+          offsetX = mx - node.x;
+          offsetY = my - node.y;
+          draggingNode = node;
+          ghostX = node.x;
+          ghostY = node.y;
+          isDragging = false;
+          selectedNode = node;
+          isPanning = false;
+
+          const now = Date.now();
+          if (lastTapNode === node && now - lastTapTime < 400) {
+            showRenameInput(node);
+          }
+          lastTapNode = node;
+          lastTapTime = now;
+          break;
+        }
+      }
+    }, { passive: false });
+
+    canvas.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      if (e.touches.length === 2) {
+        const newDist = getTouchDistance(e);
+        const zoomAmount = newDist / lastTouchDist;
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const mouse = toCanvasCoords(midX, midY);
+        const newScale = Math.min(Math.max(viewScale * zoomAmount, 0.1), 4);
+        viewOffsetX -= (mouse.x * newScale - mouse.x * viewScale);
+        viewOffsetY -= (mouse.y * newScale - mouse.y * viewScale);
+        viewScale = newScale;
+        lastTouchDist = newDist;
+        requestDraw();
+        return;
+      }
+
+      const { x, y } = getEventPosition(e);
+      if (isPanning) {
+        viewOffsetX = x - panStartX;
+        viewOffsetY = y - panStartY;
+        requestDraw();
+      }
+      if (!draggingNode) return;
+      const { x: mx, y: my } = toCanvasCoords(x, y);
+      const dx = mx - ghostX;
+      const dy = my - ghostY;
+      if (!isDragging && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        isDragging = true;
+      }
+      if (isDragging) {
+        ghostX = mx - offsetX;
+        ghostY = my - offsetY;
+        requestDraw();
+      }
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", (e) => {
+      isPanning = false;
+      if (isDragging && draggingNode) {
+        const { x, y } = getEventPosition(e.changedTouches[0]);
+        const { x: mx, y: my } = toCanvasCoords(x, y);
+        for (const node of nodes) {
+          if (node !== draggingNode && node.isInside(mx, my)) {
+            if (draggingNode.parent) {
+              draggingNode.parent.children = draggingNode.parent.children.filter(c => c !== draggingNode);
+            }
+            draggingNode.parent = node;
+            node.children.push(draggingNode);
+            links = links.filter(l => l.to !== draggingNode);
+            links.push({ from: node, to: draggingNode });
+            break;
+          }
+        }
+        autoLayout();
+      }
+      draggingNode = null;
+      isDragging = false;
       requestDraw();
     });
+
+    // Desktop rename on double-click
+    canvas.addEventListener("dblclick", (e) => {
+      const { x, y } = getEventPosition(e);
+      const { x: mx, y: my } = toCanvasCoords(x, y);
+      for (const node of nodes) {
+        if (node.isInside(mx, my)) {
+          showRenameInput(node);
+          break;
+        }
+      }
+    });
+
+    function showRenameInput(node) {
+      renameInput.style.display = "block";
+      renameInput.value = node.text;
+      renameInput.style.left = `${node.x * viewScale + viewOffsetX}px`;
+      renameInput.style.top = `${node.y * viewScale + viewOffsetY}px`;
+      renameInput.style.width = `${node.width * viewScale}px`;
+      renameInput.style.height = `${node.height * viewScale}px`;
+      renameInput.style.lineHeight = `${node.height * viewScale}px`;
+      renameInput.focus();
+
+      renameInput.onblur = () => {
+        node.text = renameInput.value.trim() || node.text;
+        renameInput.style.display = "none";
+        autoLayout();
+        requestDraw();
+      };
+      renameInput.onkeydown = (event) => {
+        if (event.key === "Enter") {
+          renameInput.blur();
+        }
+      };
+    }
 
     requestDraw();
   </script>
 </body>
 </html>
+
+
