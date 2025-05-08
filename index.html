@@ -297,34 +297,45 @@
     }
 
     function autoLayout() {
-      const root = nodes.find(n => !n.parent);
-      if (!root) return;
+		const root = nodes.find(n => !n.parent);
+		if (!root) return;
 
-      const spacingX = 180;
-      const spacingY = 60;
-      const canvasCenterY = canvas.height / 2;
-      let yOffset = 0;
+		const spacingY = 60;
+		const horizontalPadding = 40;
+		const canvasCenterY = canvas.height / 2;
+		
+		for (const node of nodes) {
+			node.width = node.calculateWidth();
+		}
 
-      function layout(node, depth = 0) {
-        const children = node.children;
-        if (children.length === 0) {
-          node.x = depth * spacingX + 100;
-          node.y = yOffset;
-          yOffset += spacingY;
-          return node.y;
-        } else {
-          let childYs = children.map(child => layout(child, depth + 1));
-          const avgY = childYs.reduce((a, b) => a + b, 0) / childYs.length;
-          node.x = depth * spacingX + 100;
-          node.y = avgY;
-          return avgY;
-        }
-      }
+		let yOffset = 0;
 
-      yOffset = canvasCenterY - (countLeaves(root) * spacingY) / 2;
-      layout(root);
-      autoNumberNodes();
-    }
+		function layout(node, depth = 0) {
+			const children = node.children;
+
+			if (node.parent) {
+				node.x = node.parent.x + node.parent.width + horizontalPadding;
+			  }	else {
+				node.x = 100; // root node
+			  }
+
+			if (children.length === 0) {
+				node.y = yOffset;
+			yOffset += node.height + spacingY;
+			return node.y;
+		  } else {
+			const childYs = children.map(child => layout(child, depth + 1));
+			const avgY = childYs.reduce((a, b) => a + b, 0) / childYs.length;
+			node.y = avgY;
+			return avgY;
+		  }
+		}
+
+		yOffset = canvasCenterY - (countLeaves(root) * spacingY) / 2;
+		layout(root);
+		autoNumberNodes();
+}
+
 
     function autoNumberNodes() {
       const root = nodes.find(n => !n.parent);
@@ -560,31 +571,34 @@
     });
 
     function showRenameInput(node) {
+      const scale = viewScale;
+      const x = node.x * scale + viewOffsetX;
+      const y = node.y * scale + viewOffsetY;
+      
       renameInput.style.display = "block";
       renameInput.value = node.text;
-      renameInput.style.left = `${node.x * viewScale + viewOffsetX}px`;
-      renameInput.style.top = `${node.y * viewScale + viewOffsetY}px`;
-      renameInput.style.width = `${node.width * viewScale}px`;
-      renameInput.style.height = `${node.height * viewScale}px`;
-      renameInput.style.lineHeight = `${node.height * viewScale}px`;
+      
+      renameInput.style.left = `${x}px`;
+      renameInput.style.top = `${y}px`;
+      renameInput.style.width = `${node.width * scale}px`;
+      renameInput.style.height = `${node.height * scale}px`;
+      
+      renameInput.style.fontSize = `${14 * scale}px`;renameInput.style.lineHeight = `${node.height * scale}px`;renameInput.style.borderRadius = `${10 * scale}px`;renameInput.style.paddingLeft = `${10 * scale}px`;renameInput.style.paddingRight = `${10 * scale}px`;
+      
+      renameInput.style.boxSizing = 'border-box';
+      
       renameInput.focus();
-
+      
       renameInput.onblur = () => {
-        node.text = renameInput.value.trim() || node.text;
-        renameInput.style.display = "none";
-        autoLayout();
-        requestDraw();
-      };
-      renameInput.onkeydown = (event) => {
-        if (event.key === "Enter") {
-          renameInput.blur();
-        }
-      };
-    }
-
-    requestDraw();
+		node.text = renameInput.value.trim() || node.text;
+		renameInput.style.display = "none";
+		autoLayout();
+		requestDraw();
+	};
+	renameInput.onkeydown = (event) => {
+		if (event.key === "Enter") renameInput.blur();
+	};
+}
   </script>
 </body>
 </html>
-
-
