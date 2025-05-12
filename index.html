@@ -83,6 +83,7 @@
   <div id="toolbar">
     <input id="nodeTextInput" type="text" placeholder="New node label" />
     <button onclick="addNode()">Add Node</button>
+    <button onclick="centerMindmap()">Center</button>
     <button onclick="clearNodes()">Clear</button>
   </div>
   <div id="canvas-container">
@@ -176,6 +177,7 @@
                my >= this.y && my <= this.y + this.height;
       }
     }
+    
     function toCanvasCoords(x, y) {
       return {
         x: (x - viewOffsetX) / viewScale,
@@ -211,6 +213,36 @@
       nodes = [];
       links = [];
       selectedNode = null;
+      requestDraw();
+    }
+
+    function centerMindmap() {
+      // If no nodes, nothing to center
+      if (nodes.length === 0) return;
+      
+      // Calculate the bounding box of all nodes
+      let minX = Infinity, maxX = -Infinity;
+      let minY = Infinity, maxY = -Infinity;
+      
+      for (const node of nodes) {
+        minX = Math.min(minX, node.x);
+        maxX = Math.max(maxX, node.x + node.width);
+        minY = Math.min(minY, node.y);
+        maxY = Math.max(maxY, node.y + node.height);
+      }
+      
+      // Calculate center of the mindmap
+      const mindmapCenterX = (minX + maxX) / 2;
+      const mindmapCenterY = (minY + maxY) / 2;
+      
+      // Calculate center of the canvas
+      const canvasCenterX = canvas.width / 2;
+      const canvasCenterY = canvas.height / 2;
+      
+      // Set the view offset to center the mindmap
+      viewOffsetX = canvasCenterX - mindmapCenterX * viewScale;
+      viewOffsetY = canvasCenterY - mindmapCenterY * viewScale;
+      
       requestDraw();
     }
 
@@ -598,7 +630,18 @@
 	renameInput.onkeydown = (event) => {
 		if (event.key === "Enter") renameInput.blur();
 	};
-}
+    }
+
+    // Auto-center the mindmap on initial load
+    window.addEventListener("load", () => {
+      // We'll wait a brief moment to ensure all resources are loaded
+      setTimeout(() => {
+        // If nodes are added during initial load, center them
+        if (nodes.length > 0) {
+          centerMindmap();
+        }
+      }, 100);
+    });
   </script>
 </body>
 </html>
