@@ -220,27 +220,29 @@
       // If no nodes, nothing to center
       if (nodes.length === 0) return;
       
-      // Calculate the bounding box of all nodes
-      let minX = Infinity, maxX = -Infinity;
+      // Find the root node (node with no parent)
+      const rootNode = nodes.find(n => !n.parent);
+      if (!rootNode) return;
+      
+      // Calculate the bounding box of all nodes (for vertical centering)
       let minY = Infinity, maxY = -Infinity;
       
       for (const node of nodes) {
-        minX = Math.min(minX, node.x);
-        maxX = Math.max(maxX, node.x + node.width);
         minY = Math.min(minY, node.y);
         maxY = Math.max(maxY, node.y + node.height);
       }
       
-      // Calculate center of the mindmap
-      const mindmapCenterX = (minX + maxX) / 2;
+      // Calculate center of the mindmap vertically
       const mindmapCenterY = (minY + maxY) / 2;
       
       // Calculate center of the canvas
-      const canvasCenterX = canvas.width / 2;
       const canvasCenterY = canvas.height / 2;
       
-      // Set the view offset to center the mindmap
-      viewOffsetX = canvasCenterX - mindmapCenterX * viewScale;
+      // Position root node towards the left with padding
+      const leftPadding = canvas.width * 0.15; // 15% from left edge
+      
+      // Set the view offset to position the root node on the left and center vertically
+      viewOffsetX = leftPadding - rootNode.x * viewScale;
       viewOffsetY = canvasCenterY - mindmapCenterY * viewScale;
       
       requestDraw();
