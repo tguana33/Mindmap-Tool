@@ -84,6 +84,7 @@
     <input id="nodeTextInput" type="text" placeholder="New node label" />
     <button onclick="addNode()">Add Node</button>
     <button onclick="centerMindmap()">Center</button>
+    <button onclick="undo()" id="undoBtn" disabled>Undo</button>
     <button onclick="clearNodes()">Clear</button>
   </div>
   <div id="canvas-container">
@@ -118,6 +119,10 @@
     let lastTouchDist = null;
     let lastTapTime = 0;
     let lastTapNode = null;
+    
+    // History for undo
+    let history = [];
+    const maxHistorySteps = 20; // Maximum number of steps to store
 
     class Node {
       constructor(text) {
@@ -207,13 +212,134 @@
       selectedNode = node;
       autoLayout();
       requestDraw();
+      
+      // Save state after adding node
+      saveToHistory();
     }
 
+    // Save the current state to history
+    function saveToHistory() {
+      // Create deep copy of nodes and links to save in history
+      const nodesCopy = nodes.map(node => {
+        const nodeCopy = Object.assign({}, node);
+        nodeCopy.children = []; // Will reconnect children below
+        nodeCopy.parent = null; // Will reconnect parent below
+        return nodeCopy;
+      });
+      
+      // Reconnect parent and children references using indices
+      const nodeIndexMap = new Map();
+      nodes.forEach((node, index) => {
+        nodeIndexMap.set(node, index);
+      });
+      
+      nodes.forEach((originalNode, index) => {
+        if (originalNode.parent) {
+          const parentIndex = nodeIndexMap.get(originalNode.parent);
+          nodesCopy[index].parent = parentIndex;
+        }
+        
+        originalNode.children.forEach(child => {
+          const childIndex = nodeIndexMap.get(child);
+          nodesCopy[index].children.push(childIndex);
+        });
+      });
+      
+      const linksCopy = links.map(link => ({
+        from: nodeIndexMap.get(link.from),
+        to: nodeIndexMap.get(link.to)
+      }));
+      
+      const selectedNodeIndex = selectedNode ? nodeIndexMap.get(selectedNode) : null;
+      
+      // Add state to history
+      history.push({
+        nodes: nodesCopy,
+        links: linksCopy,
+        selectedNode: selectedNodeIndex,
+        viewOffsetX,
+        viewOffsetY,
+        viewScale
+      });
+      
+      // Limit history size
+      if (history.length > maxHistorySteps) {
+        history = history.slice(1);
+      }
+      
+      // Update undo button state
+      updateUndoButton();
+    }
+    
+    // Restore state from history
+    function restoreFromHistory(state) {
+      // Create new node objects
+      const newNodes = state.nodes.map(nodeCopy => {
+        const node = new Node(nodeCopy.text);
+        node.numbering = nodeCopy.numbering;
+        node.x = nodeCopy.x;
+        node.y = nodeCopy.y;
+        node.height = nodeCopy.height;
+        node.width = nodeCopy.width;
+        return node;
+      });
+      
+      // Reconnect parent and children references
+      state.nodes.forEach((nodeCopy, index) => {
+        if (nodeCopy.parent !== null) {
+          newNodes[index].parent = newNodes[nodeCopy.parent];
+        }
+        
+        nodeCopy.children.forEach(childIndex => {
+          newNodes[index].children.push(newNodes[childIndex]);
+        });
+      });
+      
+      // Restore links
+      const newLinks = state.links.map(linkCopy => ({
+        from: newNodes[linkCopy.from],
+        to: newNodes[linkCopy.to]
+      }));
+      
+      // Update current state
+      nodes = newNodes;
+      links = newLinks;
+      selectedNode = state.selectedNode !== null ? newNodes[state.selectedNode] : null;
+      viewOffsetX = state.viewOffsetX;
+      viewOffsetY = state.viewOffsetY;
+      viewScale = state.viewScale;
+      
+      requestDraw();
+    }
+    
+    // Perform undo operation
+    function undo() {
+      if (history.length <= 1) return;
+      
+      // Remove current state
+      history.pop();
+      
+      // Get the previous state
+      const previousState = history[history.length - 1];
+      
+      // Restore the previous state
+      restoreFromHistory(previousState);
+      
+      updateUndoButton();
+    }
+    
+    // Update the enabled state of undo button
+    function updateUndoButton() {
+      document.getElementById('undoBtn').disabled = history.length <= 1;
+    }
+    
     function clearNodes() {
       nodes = [];
       links = [];
       selectedNode = null;
       requestDraw();
+      
+      // The next action will save the empty state
     }
 
     function centerMindmap() {
@@ -316,6 +442,9 @@
         [siblings[idx - 1], siblings[idx]] = [siblings[idx], siblings[idx - 1]];
         autoLayout();
         requestDraw();
+        
+        // Save state after reordering
+        saveToHistory();
       }
     }
 
@@ -327,6 +456,9 @@
         [siblings[idx], siblings[idx + 1]] = [siblings[idx + 1], siblings[idx]];
         autoLayout();
         requestDraw();
+        
+        // Save state after reordering
+        saveToHistory();
       }
     }
 
@@ -479,6 +611,9 @@
           }
         }
         autoLayout();
+        
+        // Save state after completing drag operation
+        saveToHistory();
       }
       draggingNode = null;
       isDragging = false;
@@ -586,6 +721,9 @@
           }
         }
         autoLayout();
+        
+        // Save state after completing touch drag operation
+        saveToHistory();
       }
       draggingNode = null;
       isDragging = false;
@@ -623,15 +761,24 @@
       
       renameInput.focus();
       
+      const originalText = node.text;
+      
       renameInput.onblur = () => {
-		node.text = renameInput.value.trim() || node.text;
-		renameInput.style.display = "none";
-		autoLayout();
-		requestDraw();
-	};
-	renameInput.onkeydown = (event) => {
-		if (event.key === "Enter") renameInput.blur();
-	};
+        const newText = renameInput.value.trim() || node.text;
+        renameInput.style.display = "none";
+        
+        // Only save to history if the text actually changed
+        if (newText !== originalText) {
+          node.text = newText;
+          autoLayout();
+          requestDraw();
+          // Save state after renaming
+          saveToHistory();
+        }
+      };
+      renameInput.onkeydown = (event) => {
+        if (event.key === "Enter") renameInput.blur();
+      };
     }
 
     // Auto-center the mindmap on initial load
@@ -642,6 +789,9 @@
         if (nodes.length > 0) {
           centerMindmap();
         }
+        
+        // Initialize history with initial state
+        saveToHistory();
       }, 100);
     });
   </script>
