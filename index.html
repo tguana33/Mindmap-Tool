@@ -114,6 +114,9 @@
     <button onclick="addNode()" aria-label="Add Node">
       <i data-feather="plus"></i>
     </button>
+    <button onclick="deleteNode()" id="deleteBtn" disabled aria-label="Delete Node">
+      <i data-feather="minus"></i>
+    </button>
     <button onclick="centerMindmap()" aria-label="Center View">
       <i data-feather="crosshair"></i>
     </button>
@@ -249,8 +252,57 @@
       selectedNode = node;
       autoLayout();
       requestDraw();
+      updateDeleteButton();
       
       // Save state after adding node
+      saveToHistory();
+    }
+    
+    function deleteNode() {
+      if (!selectedNode) return;
+      
+      // If trying to delete root node and it has children, don't allow it
+      if (!selectedNode.parent && selectedNode.children.length > 0) {
+        alert("Cannot delete root node with children. Delete children first or use Clear All.");
+        return;
+      }
+      
+      // Remove the node from its parent's children array
+      if (selectedNode.parent) {
+        selectedNode.parent.children = selectedNode.parent.children.filter(
+          child => child !== selectedNode
+        );
+      }
+      
+      // Recursively remove this node and all its descendants
+      function removeNodeAndDescendants(node) {
+        // First remove all children recursively
+        for (const child of [...node.children]) {
+          removeNodeAndDescendants(child);
+        }
+        
+        // Remove links connecting to this node
+        links = links.filter(link => link.from !== node && link.to !== node);
+        
+        // Remove the node itself
+        const nodeIndex = nodes.indexOf(node);
+        if (nodeIndex > -1) {
+          nodes.splice(nodeIndex, 1);
+        }
+      }
+      
+      // Start the recursive removal
+      removeNodeAndDescendants(selectedNode);
+      
+      // Update the selected node
+      selectedNode = null;
+      
+      // Rearrange the mindmap
+      autoLayout();
+      requestDraw();
+      updateDeleteButton();
+      
+      // Save state after deletion
       saveToHistory();
     }
 
@@ -363,6 +415,7 @@
       restoreFromHistory(previousState);
       
       updateUndoButton();
+      updateDeleteButton();
     }
     
     // Update the enabled state of undo button
@@ -370,11 +423,17 @@
       document.getElementById('undoBtn').disabled = history.length <= 1;
     }
     
+    // Update the enabled state of delete button
+    function updateDeleteButton() {
+      document.getElementById('deleteBtn').disabled = !selectedNode;
+    }
+    
     function clearNodes() {
       nodes = [];
       links = [];
       selectedNode = null;
       requestDraw();
+      updateDeleteButton();
       
       // The next action will save the empty state
     }
@@ -603,6 +662,7 @@
           ghostY = node.y;
           isDragging = false;
           selectedNode = node;
+          updateDeleteButton();
           isPanning = false;
           break;
         }
@@ -655,6 +715,7 @@
       draggingNode = null;
       isDragging = false;
       requestDraw();
+      updateDeleteButton();
     });
 
     canvas.addEventListener("wheel", (e) => {
@@ -690,6 +751,7 @@
           ghostY = node.y;
           isDragging = false;
           selectedNode = node;
+          updateDeleteButton();
           isPanning = false;
 
           const now = Date.now();
@@ -765,6 +827,7 @@
       draggingNode = null;
       isDragging = false;
       requestDraw();
+      updateDeleteButton();
     });
 
     // Desktop rename on double-click
@@ -792,7 +855,11 @@
       renameInput.style.width = `${node.width * scale}px`;
       renameInput.style.height = `${node.height * scale}px`;
       
-      renameInput.style.fontSize = `${14 * scale}px`;renameInput.style.lineHeight = `${node.height * scale}px`;renameInput.style.borderRadius = `${10 * scale}px`;renameInput.style.paddingLeft = `${10 * scale}px`;renameInput.style.paddingRight = `${10 * scale}px`;
+      renameInput.style.fontSize = `${14 * scale}px`;
+      renameInput.style.lineHeight = `${node.height * scale}px`;
+      renameInput.style.borderRadius = `${10 * scale}px`;
+      renameInput.style.paddingLeft = `${10 * scale}px`;
+      renameInput.style.paddingRight = `${10 * scale}px`;
       
       renameInput.style.boxSizing = 'border-box';
       
@@ -822,6 +889,9 @@
     window.addEventListener("load", () => {
       // Initialize Feather icons
       feather.replace();
+      
+      // Update delete button state
+      updateDeleteButton();
       
       // We'll wait a brief moment to ensure all resources are loaded
       setTimeout(() => {
