@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
   <title>Mindmap Tool</title>
+  <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
   <style>
     html, body {
       margin: 0;
@@ -34,6 +35,30 @@
       padding: 6px 12px;
       font-size: 14px;
       outline: none;
+    }
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border: 1px solid #ddd;
+      background: white;
+      border-radius: 20px;
+      padding: 6px 12px;
+    }
+    button:hover {
+      background-color: #f5f5f5;
+    }
+    button:active {
+      background-color: #e5e5e5;
+    }
+    button[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    button svg {
+      width: 18px;
+      height: 18px;
     }
     #canvas-container {
       width: 100%;
@@ -76,16 +101,28 @@
         font-size: 16px;
         padding: 10px;
       }
+      button svg {
+        width: 20px;
+        height: 20px;
+      }
     }
   </style>
 </head>
 <body>
   <div id="toolbar">
     <input id="nodeTextInput" type="text" placeholder="New node label" />
-    <button onclick="addNode()">Add Node</button>
-    <button onclick="centerMindmap()">Center</button>
-    <button onclick="undo()" id="undoBtn" disabled>Undo</button>
-    <button onclick="clearNodes()">Clear</button>
+    <button onclick="addNode()" aria-label="Add Node">
+      <i data-feather="plus"></i>
+    </button>
+    <button onclick="centerMindmap()" aria-label="Center View">
+      <i data-feather="crosshair"></i>
+    </button>
+    <button onclick="undo()" id="undoBtn" disabled aria-label="Undo">
+      <i data-feather="corner-up-left"></i>
+    </button>
+    <button onclick="clearNodes()" aria-label="Clear All">
+      <i data-feather="trash-2"></i>
+    </button>
   </div>
   <div id="canvas-container">
     <canvas id="mindmap"></canvas>
@@ -783,6 +820,9 @@
 
     // Auto-center the mindmap on initial load
     window.addEventListener("load", () => {
+      // Initialize Feather icons
+      feather.replace();
+      
       // We'll wait a brief moment to ensure all resources are loaded
       setTimeout(() => {
         // If nodes are added during initial load, center them
